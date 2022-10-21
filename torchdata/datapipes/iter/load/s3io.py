@@ -5,7 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 from io import BytesIO
-from typing import Iterator, Tuple
+from typing import Iterator, Tuple, Union, List
+
+from torch.utils.data.datapipes.utils.common import match_masks
 
 import torchdata
 from torchdata.datapipes import functional_datapipe
@@ -49,19 +51,23 @@ class S3FileListerIterDataPipe(IterDataPipe[str]):
         ...     pass
     """
 
-    def __init__(self, source_datapipe: IterDataPipe[str], length: int = -1, request_timeout_ms=-1, region="") -> None:
+    def __init__(self, source_datapipe: IterDataPipe[str], length: int = -1, request_timeout_ms=-1, region="",
+                 masks: Union[str, List[str]] = "") -> None:
         if not hasattr(torchdata, "_torchdata") or not hasattr(torchdata._torchdata, "S3Handler"):
             raise ModuleNotFoundError("TorchData must be built with BUILD_S3=1 to use this datapipe.")
 
         self.source_datapipe: IterDataPipe[str] = source_datapipe
         self.length: int = length
         self.handler = torchdata._torchdata.S3Handler(request_timeout_ms, region)
+        self.masks = masks
 
     def __iter__(self) -> Iterator[str]:
         for prefix in self.source_datapipe:
             while True:
                 urls = self.handler.list_files(prefix)
-                yield from urls
+                for url in urls:
+                    if match_masks(url, self.masks):
+                        yield url
                 if not urls:
                     break
             self.handler.clear_marker()
